@@ -95,28 +95,10 @@ metadata %<>% .[toRemove[["ALAT"]],]
 exprDf %<>% .[toRemove[["ALAT"]],]
 
 
-#Record
-wb <- createWorkbook()
-addWorksheet(wb, "OriginalMetadata")
-writeDataTable(wb, "OriginalMetadata", metadata, rowNames = TRUE)
-addWorksheet(wb, "OriginalExpression")
-writeDataTable(wb, "OriginalExpression", as.data.frame(exprDf), rowNames = TRUE)
-saveWorkbook(wb, file.path(getwd(), "Dataset.xlsx"))
-
-
-#Remove donors, where NA is in one of crucial criteria
+#Create a selection matrix:
 selectionMatrix <- matrix(nrow = nrow(metadata), ncol = 5)
 colnames(selectionMatrix) <- c("Waist_circumference", "blood_pressure_diastolic", "ClinData_TG", "ClinData_HDL-cholesterol", "ClinData_Glucose")
 
-#Remove NAs everywhere
-toRemove[["NAs"]] <- metadata %>% .[, colnames(selectionMatrix)] %>% is.na() %>% apply(., 1, function(patient) sum(patient) < 1)
-
-metadata %<>% .[toRemove[["NAs"]],]
-exprDf %<>% .[toRemove[["NAs"]],]
-selectionMatrix %<>% .[toRemove[["NAs"]],]
-
-
-#Create a selection matrix:
 #Waist_circumference: male >= 100, female >= 90
 selectionMatrix[,1] <- sapply(seq_along(metadata$ASAP_ID), function(index) {
   if(metadata$Sex[index] == "M") {
@@ -160,14 +142,33 @@ selectionMatrix[,5] <- sapply(seq_along(metadata$ASAP_ID), function(index) {
 
 apply(selectionMatrix, 2, summary)
 
-#Save selection matrix
-addWorksheet(wb, "SelectionMatrix")
-writeDataTable(wb, "SelectionMatrix", as.data.frame(selectionMatrix))
-
 
 #Mark the donors according to the selection matrix
 metadata$MS <- rowSums(selectionMatrix, na.rm = TRUE) > 2
 metadata$MS <- ifelse(metadata$MS == TRUE, ifelse(selectionMatrix[, "Waist_circumference"] == TRUE, "MS", "semi-MS"), "Non-MS") %>% factor(., levels = c("Non-MS", "semi-MS", "MS"))
+
+
+#Record
+wb <- createWorkbook()
+addWorksheet(wb, "OriginalMetadata")
+writeDataTable(wb, "OriginalMetadata", metadata, rowNames = TRUE)
+addWorksheet(wb, "OriginalExpression")
+writeDataTable(wb, "OriginalExpression", as.data.frame(exprDf), rowNames = TRUE)
+addWorksheet(wb, "SelectionMatrix")
+writeDataTable(wb, "SelectionMatrix", as.data.frame(selectionMatrix))
+saveWorkbook(wb, file.path(getwd(), "Dataset.xlsx"))
+
+
+#Remove donors, where NA is in one of crucial criteria
+selectionMatrix <- matrix(nrow = nrow(metadata), ncol = 5)
+colnames(selectionMatrix) <- c("Waist_circumference", "blood_pressure_diastolic", "ClinData_TG", "ClinData_HDL-cholesterol", "ClinData_Glucose")
+
+#Remove NAs everywhere
+toRemove[["NAs"]] <- metadata %>% .[, colnames(selectionMatrix)] %>% is.na() %>% apply(., 1, function(patient) sum(patient) < 1)
+
+metadata %<>% .[toRemove[["NAs"]],]
+exprDf %<>% .[toRemove[["NAs"]],]
+selectionMatrix %<>% .[toRemove[["NAs"]],]
 
 summary(metadata$MS)
 
