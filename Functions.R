@@ -132,3 +132,72 @@ setMethod("pcrFormatStatLabels", signature(object = "data.frame"), function(obje
   
   return(object)
 })
+
+#Are all instances of vector X present in vector Y?
+setGeneric("%v%", function(x, y) standardGeneric("%v%"))
+setMethod("%v%", signature(x = "vector", y = "vector"), function(x, y) {
+  all(x %in% y)
+})
+setMethod("%v%", signature(x = "vector", y = "list"), function(x, y) {
+  all(sapply(y, function(z) x %v% z))
+})
+
+#Calcualte stuff
+calculateExpression <- function(exprMat, metaDf, compCol) {
+  sumList <- lapply(colnames(exprMat), function(gene) {
+    exprGene <- exprMat[, gene, drop = FALSE]
+    colnames(exprGene) <- "Value"
+    
+    exprGene <- cbind(metaDf[, compCol, drop = FALSE], exprGene)
+    colnames(exprGene)[colnames(exprGene) == compCol] <- "Comparison"
+    
+    sumDf <- dplyr::group_by_at(exprGene, "Comparison") %>%
+      dplyr::summarise(Mean = mean(Value, na.rm = TRUE),
+                       SD = sd(Value, na.rm = TRUE),
+                       Var = var(Value, na.rm = TRUE),
+                       Count = sum(complete.cases(Value))
+      )
+    
+    sumDf %<>% dplyr::mutate(SEM = .$SD/sqrt(.$Count))
+    
+    statDf <- ggpubr::compare_means(Value ~ Comparison, exprGene)
+    
+    list(Expression = exprGene,
+         Summary = sumDf,
+         Stats = statDf
+    )
+  })
+  names(sumList) <- colnames(exprMat)
+  
+  return(sumList)
+}
+
+#Export data
+exportData <- function(dataList, metaDf, fileName) {
+  exprMat <- lapply(dataList, function(gene) gene[["Expression"]]$Value) %>%
+    do.call("cbind", .)
+  colnames(exprMat) <- names(dataList)
+  rownames(exprMat) <- rownames(metaDf)
+  
+  sumData <- lapply(dataList, function(gene) gene$Summary) %>%
+    pcrMerge(., "Gene")
+  
+  statData <- lapply(dataList, function(gene) gene$Stats) %>%
+    pcrMerge(., "Gene")
+  
+  wb <- createWorkbook()
+  
+  addWorksheet(wb, "Metadata")
+  writeData(wb, 1, metaDf)
+
+  addWorksheet(wb, "Expression")
+  writeData(wb, 2, exprMat, rowNames = TRUE)
+  
+  addWorksheet(wb, "Results")
+  writeData(wb, 3, sumData)
+  
+  addWorksheet(wb, "Stats")
+  writeData(wb, 4, statData)
+  
+  saveWorkbook(wb, file.path(getwd(), fileName))
+}
