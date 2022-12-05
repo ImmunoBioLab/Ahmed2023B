@@ -1,6 +1,11 @@
 library(openxlsx)
 library(magrittr)
 library(stringr)
+library(ggplot2)
+library(showtext)
+font_add(family = "docktrin", regular = "C:/Users/vlasha/Downloads/docktrin/docktrin.ttf")
+showtext_auto(enable = TRUE, record = TRUE)
+
 
 setwd("Z:/Groups/Peder Olofsson/VSS/Bioconductor/HepatoCohort")
 
@@ -9,6 +14,11 @@ toRemove <- list()
 #Create sets of interesting genes
 cholGenes <- c("SREBF2", "HMGCR", "HMGCS1", "LDLR", "PCSK9", "NPC1L1", "CETP", "LCAT", "ABCG1") %>% factor(., levels = .)
 tgGenes <- c("SREBF1", "ACLY", "ACACA", "ACACB", "SCD", "FAS", "MLXIPL", "NR1H2", "AGPAT2", "ANGPTL4", "FABP4", "MTTP") %>% factor(., levels = .)
+
+#Create parameter vectors
+categorical <- c("Sex", "Regular_smoker")
+numerical <- c("Age",  "BMI", "BSA_DuBois", "Insulin", "ApoB", "ApoA1", "Lp(a)", "Height", "Weight", "Waist_circumference", "Hip_circumference", "Fasting_time", "ClinData_Glucose", 
+                "ClinData_TG", "ClinData_Cholesterol", "ClinData_HDL-cholesterol", "ClinData_LDL-cholesterol", "ClinData_HbA1c", "ALAT")
 
 
 #Combine all files and create sensible data structure
@@ -64,19 +74,41 @@ metadata[["blood_pressure_systolic"]] <- metadata %>% .[, c("blood_pressure_syst
 
 metadata %<>% .[, !colnames(metadata) %in% c("blood_pressure_diastolic_1", "blood_pressure_diastolic_2", "blood_pressure_systolic_1", "blood_pressure_systolic_2")]
 
+metadata[["Regular_smoker"]][metadata$Regular_smoker == 0] <- "Non-smoker"
+metadata[["Regular_smoker"]][metadata$Regular_smoker == 1] <- "Smoker"
+
 exprDf <- allData %>% .[, !colnames(allData) %in% c(colnames(metadata), "rs738409.y", "rs738409.x", "blood_pressure_systolic_1", "blood_pressure_diastolic_1", 
                                                     "blood_pressure_systolic_2", "blood_pressure_diastolic_2")] %>% apply(., 2, as.double) %>% 
   .[, !colnames(.) %in% c("PNPLA3.1", "TM6SF2.1", "SREBF2.1", "PLIN2_A", "FAS_A", "SOAT2.1", "ACAT2_A", "SCAP_A", "HMGCR_A", 
                           "CIDEA_A", "ACACA_A", "CES2_A", "SREBF1.1", "ABCG1_A",  "ABCG1_B",  "ABCG1_C", "SYP.1")]
 rownames(exprDf) <- str_c("P", metadata$ASAP_ID, sep = "")
 
+#Gather diabetes data
+metadata[["GENEPOOL_Current_Medication__Preparation_and_dose"]][metadata$`GENEPOOL_Current_Medication__Medication,_type` == "None"] <- "None"
+diabetes <- metadata %>% .[, c("GENEPOOL_Current_Medication__Medication,_type", "GENEPOOL_Current_Medication__Preparation_and_dose")] %>% 
+  apply(., 1, function(patient) str_c(patient, collapse = " "))
+diabetes %<>% str_to_lower(.) %>% sapply(., function(patient) {
+  sapply(c("insulin", "metformin", "glucophage", "mindiab"), function(medication) str_detect(patient, medication))
+}) %>% t()
+metadata$Diabetes <- apply(diabetes, 1, function(patient) sum(patient) > 0)
+metadata$Diabetes <- ifelse(metadata$Diabetes == TRUE, "Diabetes", "No diabetes") %>% factor(., levels = c("No diabetes", "Diabetes"))
+
+summary(metadata$Diabetes)
+
+
+#Gather statin data
+metadata$corStatin <- metadata %>% .[, colnames(.) %in% c("zocord", "Lipitor", "crestor", "simvastatin")] %>% apply(., 1, function(patient) sum(patient, na.rm = TRUE) > 0)
+metadata$corStatin <- ifelse(metadata$corStatin == TRUE, "Statins", "No Statins") %>% factor(., levels = c("Statins", "No Statins"))
+
+summary(metadata$corStatin)
+
 
 #Clean the dataset:
 #Remove donors with NA in statins
-toRemove[["Statins"]] <- !is.na(metadata$Statins)
+toRemove[["Statins"]] <- is.na(metadata$Statins) & metadata$corStatin == FALSE
 
-metadata %<>% .[toRemove[["Statins"]],]
-exprDf %<>% .[toRemove[["Statins"]],]
+metadata %<>% .[!toRemove[["Statins"]],]
+exprDf %<>% .[!toRemove[["Statins"]],]
 
 
 #Remove patients who were fasted for less then 6h
@@ -98,6 +130,7 @@ exprDf %<>% .[toRemove[["ALAT"]],]
 #Create a selection matrix:
 selectionMatrix <- matrix(nrow = nrow(metadata), ncol = 5)
 colnames(selectionMatrix) <- c("Waist_circumference", "blood_pressure_diastolic", "ClinData_TG", "ClinData_HDL-cholesterol", "ClinData_Glucose")
+rownames(selectionMatrix) <- rownames(metadata)
 
 #Waist_circumference: male >= 100, female >= 90
 selectionMatrix[,1] <- sapply(seq_along(metadata$ASAP_ID), function(index) {
@@ -110,10 +143,10 @@ selectionMatrix[,1] <- sapply(seq_along(metadata$ASAP_ID), function(index) {
 
 #Blood pressure: systolic >= 130 or diastolic >= 85
 selectionMatrix[,2] <- sapply(seq_along(metadata$ASAP_ID), function(index) {
-  if(is.na(metadata[index, "blood_pressure_systolic"]) == TRUE || is.na(metadata[index, "blood_pressure_diastolic"]) == TRUE) {
+  if(is.na(metadata[index, "blood_pressure_systolic"]) == TRUE && is.na(metadata[index, "blood_pressure_diastolic"]) == TRUE) {
     NA
   } else {
-    if(metadata[index, "blood_pressure_systolic"] >= 130 || metadata[index, "blood_pressure_diastolic"] >= 85) {
+    if(metadata[index, "blood_pressure_systolic"] >= 130 && metadata[index, "blood_pressure_diastolic"] >= 85) {
       TRUE
     } else {
       FALSE
@@ -159,41 +192,90 @@ writeDataTable(wb, "SelectionMatrix", as.data.frame(selectionMatrix))
 saveWorkbook(wb, file.path(getwd(), "Dataset.xlsx"))
 
 
-#Remove donors, where NA is in one of crucial criteria
-selectionMatrix <- matrix(nrow = nrow(metadata), ncol = 5)
-colnames(selectionMatrix) <- c("Waist_circumference", "blood_pressure_diastolic", "ClinData_TG", "ClinData_HDL-cholesterol", "ClinData_Glucose")
+#Remove donors without waist circumference data
+toRemove[["NoWaist"]] <- metadata %>% .[, "Waist_circumference"] %>% is.na(.)
 
-#Remove NAs everywhere
-toRemove[["NAs"]] <- metadata %>% .[, colnames(selectionMatrix)] %>% is.na() %>% apply(., 1, function(patient) sum(patient) < 1)
+metadata %<>% .[!toRemove[["NoWaist"]],]
+exprDf %<>% .[!toRemove[["NoWaist"]],]
+selectionMatrix %<>% .[!toRemove[["NoWaist"]],]
 
-metadata %<>% .[toRemove[["NAs"]],]
-exprDf %<>% .[toRemove[["NAs"]],]
-selectionMatrix %<>% .[toRemove[["NAs"]],]
+
+#Remove healthy donors with big waist + one more significant criteria with at least one NA
+toRemove[["NAs"]] <- metadata %>% .[.$MS == "Non-MS",] %>% rownames()
+toRemove[["NAs"]] <- selectionMatrix %>% .[rownames(.) %in% toRemove[["NAs"]],] %>% .[.[, "Waist_circumference"] == TRUE,]
+toRemove[["NAs"]] <- apply(toRemove[["NAs"]], 1, function(patient) sum(is.na(patient)) > 1) %>% .[. == TRUE] %>% names()
+
 
 summary(metadata$MS)
 
 
-#Look at gene expression:
+#Find Non-MS patients that fullfill none of the MS criteria - not MS in any way
+nonMS <- rownames(metadata)[metadata$MS == "Non-MS"]
+
+healthyMatrix <- selectionMatrix %>% .[rownames(.) %in% nonMS,] %>% .[apply(., 1, function(patient) sum(patient) == 0),]
+
+#Assign
+metadata$SuperHealth <- metadata$MS %>% factor(., levels = c("SH", "Non-MS", "semi-MS", "MS"))
+metadata[rownames(metadata) %in% rownames(healthyMatrix), "SuperHealth"] <- "SH"
+
+summary(metadata$SuperHealth)
+
+#Record
+wb <- createWorkbook()
+addWorksheet(wb, "ProcessedMetadata")
+writeDataTable(wb, "ProcessedMetadata", metadata, rowNames = TRUE)
+addWorksheet(wb, "ProcessedExpression")
+writeDataTable(wb, "ProcessedExpression", as.data.frame(exprDf), rowNames = TRUE)
+addWorksheet(wb, "SelectionMatrix")
+writeDataTable(wb, "SelectionMatrix", as.data.frame(selectionMatrix))
+saveWorkbook(wb, file.path(getwd(), "ProcessedDataset.xlsx"))
+
+
+#Evaluate gene expression:
 #MS vs non-MS without statin treatment
-noStat <- metadata %>% .$Statins == "0"
+noStat <- metadata %>% .$corStatin == "No Statins"
 
-msStat <- calculateExpression(exprDf[noStat,], metadata[noStat,], "MS")
-
-#Export
-exportData(msStat, metadata[noStat,], "MSvsNoMS_noStatins.xlsx")
-
-
-#Statin vs non-Statin in MS
-rownames(metadata) %v% rownames(exprDf)
-
-ms <- metadata %>% .[.$MS == "MS",] %>% rownames(.)
-
-metaMS <- metadata %>% .[rownames(.) %in% ms,]
-exprMS <- exprDf %>% .[rownames(.) %in% ms,]
-
-metaMS$Statins <- ifelse(metaMS$Statins == 1, "Statins", "No-Statins")
-
-stNst <- calculateExpression(exprMS, metaMS, "Statins")
+msStat <- processDataset(exprDf[noStat,], metadata[noStat,], "MS", list(categorical, numerical))
 
 #Export
-exportData(stNst, metaMS, "MS_StatVsNoStat.xlsx")
+exportDataset(msStat, "MSvsNoMS_noStatins.xlsx")
+
+#Plot
+plotBox(msStat, geneNames = c("ACLY", "ACACA", "FAS", "SCD"), "MS", color = c("slategray1","slategray3", "slategray4")) %>%
+  pcrSaveGraph(., getwd(), "Plots", "MSvsNoMS_noStatins_FA.tiff", 4, 12)
+
+
+#MS vs non-MS without statin treatment: excluding diabetes
+noStatNoDiab <- metadata$corStatin == "No Statins" & metadata$Diabetes == "No diabetes"
+noStatNoDiab[is.na(noStatNoDiab) == TRUE] <- FALSE
+
+msStatNoDiab <- processDataset(exprDf[noStatNoDiab,], metadata[noStatNoDiab,], "MS", list(categorical, numerical))
+
+#Export
+exportDataset(msStatNoDiab, "MSvsNoMS_noStatins_noDiabetes.xlsx")
+
+
+#Statin vs non-Statin:
+#Whole dataset:
+whStat <- processDataset(exprDf, metadata, "corStatin", list(categorical, numerical))
+
+#Export
+exportDataset(whStat, "StatVsNoStat_wholeDataset.xlsx")
+
+
+#In MS
+ms <- metadata %>% .$MS == "MS"
+
+statMS <- processDataset(exprDf[ms,], metadata[ms,], "corStatin", list(categorical, numerical))
+
+#Export
+exportDataset(statMS, "StatVsNoStat_MS.xlsx")
+
+
+#In no-MS
+nonMS <- metadata %>% .$MS == "Non-MS"
+
+statNonMS <- processDataset(exprDf[nonMS,], metadata[nonMS,], "corStatin", list(categorical, numerical))
+
+#Export
+exportDataset(statNonMS, "StatVsNoStat_non-MS.xlsx")
