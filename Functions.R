@@ -460,7 +460,7 @@ plotBox <- function(dataList, geneNames, compCol = NULL, selectConds = NULL, col
 }
 
 #Export the graph as a tiff file
-pcrSaveGraph <- function(plots, ncol = length(plots), nrow = 1, expDir, wFolder, tiffName, height = 8, width = 20, res = 600, units = "in") {
+pcrSaveGraph <- function(plots,  expDir, wFolder, tiffName, ncol = length(plots), nrow = 1, height = 8, width = 20, res = 600, units = "in") {
   tiffAddress <- file.path(expDir, wFolder, tiffName)
   
   cat("Creating tiff file, address:", tiffAddress, "\n", "\n")

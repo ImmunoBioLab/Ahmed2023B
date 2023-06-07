@@ -105,15 +105,17 @@ summary(metadata$corStatin)
 
 #Clean the dataset:
 #Remove donors with NA in statins
-toRemove[["Statins"]] <- is.na(metadata$Statins) & metadata$corStatin == FALSE
+toRemove[["Statins"]] <- !(is.na(metadata$Statins) & metadata$corStatin == "No Statins")
+names(toRemove[["Statins"]]) <- rownames(metadata)
 
-metadata %<>% .[!toRemove[["Statins"]],]
-exprDf %<>% .[!toRemove[["Statins"]],]
+metadata %<>% .[toRemove[["Statins"]],]
+exprDf %<>% .[toRemove[["Statins"]],]
 
 
 #Remove patients who were fasted for less then 6h
 toRemove[["Fasting"]] <- metadata$Fasting_time >= 6
 toRemove[["Fasting"]][is.na(toRemove[["Fasting"]])] <- FALSE
+names(toRemove[["Fasting"]]) <- rownames(metadata)
 
 metadata %<>% .[toRemove[["Fasting"]],]
 exprDf %<>% .[toRemove[["Fasting"]],]
@@ -122,6 +124,7 @@ exprDf %<>% .[toRemove[["Fasting"]],]
 #Remove donors above ALAT threshold
 toRemove[["ALAT"]] <- metadata$ALAT <= 1.1
 toRemove[["ALAT"]][is.na(toRemove[["ALAT"]])] <- FALSE
+names(toRemove[["ALAT"]]) <- rownames(metadata)
 
 metadata %<>% .[toRemove[["ALAT"]],]
 exprDf %<>% .[toRemove[["ALAT"]],]
@@ -193,11 +196,12 @@ saveWorkbook(wb, file.path(getwd(), "Dataset.xlsx"))
 
 
 #Remove donors without waist circumference data
-toRemove[["NoWaist"]] <- metadata %>% .[, "Waist_circumference"] %>% is.na(.)
+toRemove[["NoWaist"]] <- metadata %>% .[, "Waist_circumference"] %>% is.na(.) %>% !.
+names(toRemove[["NoWaist"]]) <- rownames(metadata)
 
-metadata %<>% .[!toRemove[["NoWaist"]],]
-exprDf %<>% .[!toRemove[["NoWaist"]],]
-selectionMatrix %<>% .[!toRemove[["NoWaist"]],]
+metadata %<>% .[toRemove[["NoWaist"]],]
+exprDf %<>% .[toRemove[["NoWaist"]],]
+selectionMatrix %<>% .[toRemove[["NoWaist"]],]
 
 
 #Remove healthy donors with big waist + one more significant criteria with at least one NA
@@ -207,6 +211,25 @@ toRemove[["NAs"]] <- apply(toRemove[["NAs"]], 1, function(patient) sum(is.na(pat
 
 
 summary(metadata$MS)
+
+
+#Record the Removed table
+toRemove %<>% .[sapply(., function(reason) length(reason) > 0)]
+
+toExport <- data.frame(Patient = names(toRemove[[1]]),
+                       Statins = NA,
+                       Fasting = NA,
+                       ALAT = NA,
+                       NoWaist = NA
+                       )
+for(i in seq_along(toRemove)) {
+  toExport[toExport$Patient %in% names(toRemove[[i]]), i+1] <- toRemove[[i]]
+}
+
+wb <- createWorkbook()
+addWorksheet(wb, "Removed")
+writeDataTable(wb, "Removed", toExport)
+saveWorkbook(wb, file.path(getwd(), "Removed.xlsx"))
 
 
 #Find Non-MS patients that fullfill none of the MS criteria - not MS in any way
