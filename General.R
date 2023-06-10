@@ -3,8 +3,6 @@ library(magrittr)
 library(stringr)
 library(ggplot2)
 library(showtext)
-font_add(family = "docktrin", regular = "C:/Users/vlasha/Downloads/docktrin/docktrin.ttf")
-showtext_auto(enable = TRUE, record = TRUE)
 
 
 setwd("Z:/Groups/Peder Olofsson/VSS/Bioconductor/HepatoCohort")
@@ -225,6 +223,9 @@ toExport <- data.frame(Patient = names(toRemove[[1]]),
 for(i in seq_along(toRemove)) {
   toExport[toExport$Patient %in% names(toRemove[[i]]), i+1] <- toRemove[[i]]
 }
+
+toExport$Total <- rowSums(toExport[, c(2:5)])
+toExport %>% .[is.na(.$Total),] %>% nrow()
 
 wb <- createWorkbook()
 addWorksheet(wb, "Removed")
